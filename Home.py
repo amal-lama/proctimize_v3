@@ -42,7 +42,7 @@ def local_css():
             left: 50%;
             transform: translate(-50%, -50%);
             width: 50%;
-            height: 40%;
+            height: 50%;
             padding: 3rem;
             background: rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(12px);

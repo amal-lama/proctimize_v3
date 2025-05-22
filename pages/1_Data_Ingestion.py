@@ -290,6 +290,20 @@ st.title("Data Ingestion")
 
 st.markdown("""
 <style>
+    div[data-baseweb="tag"] > div {
+    background-color: #001E96 !important;
+    color: white !important;
+    border-radius: 20px !important;
+    padding: 0.3rem 0.8rem !important;
+    font-weight: 600 !important;
+    border: none !important;
+    box-shadow: none !important;
+    }
+
+    div[data-baseweb="tag"] > div > span {
+        color: white !important;
+    }
+            
     /* ✅ Sidebar with deep blue gradient */
     section[data-testid="stSidebar"] {
         background: linear-gradient(180deg, #001E96 0%, #001E96 100%) !important;
@@ -388,7 +402,8 @@ st.markdown("""
         border-color: #001E96 !important;
         box-shadow: 0 0 0 2px #001E96 !important;
     }
-
+            
+    
 </style>
 """, unsafe_allow_html=True)
 
@@ -602,6 +617,16 @@ if uploaded_files:
             
         if df_final is not None:
             st.write("### Sample of the Dataset")
+        #    # Drop the first column of the DataFrame and get all numeric columns from the rest
+        #     cols_to_format = df_final.drop(df_final.columns[0], 1).select_dtypes(include='number').columns
+
+        #     # Apply comma formatting only to selected columns
+        #     styled_df = df_final.style.format({col: '{:,}' for col in cols_to_format})
+
+        #     # Display with Streamlit
+        #     st.dataframe(styled_df)
+
+
             st.dataframe(df_final.head())
 
             date_column = st.selectbox("Select the column representing Date in merged dataset", df_final.columns)
