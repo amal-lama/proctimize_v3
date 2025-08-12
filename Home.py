@@ -173,21 +173,23 @@ def local_css():
 
 # Main app
 def main():
-    local_css()
-    st.markdown('<div class="glass-box-visual"></div>', unsafe_allow_html=True)
+    # local_css()
+    # st.markdown('<div class="glass-box-visual"></div>', unsafe_allow_html=True)
 
     
-    # Center the title using markdown with custom class
-    st.markdown("<h1 class='main-title'>ProcTimize</h1>", unsafe_allow_html=True)
+    # # Center the title using markdown with custom class
+    # st.markdown("<h1 class='main-title'>ProcTimize</h1>", unsafe_allow_html=True)
     
-    # Subtitle
-    st.markdown("<p class='subtitle'>A modern platform for Marketing Mix Modeling — ingest, clean, and transform your data effortlessly.</p>", unsafe_allow_html=True)
+    # # Subtitle
+    # st.markdown("<p class='subtitle'>A modern platform for Marketing Mix Modeling — ingest, clean, and transform your data effortlessly.</p>", unsafe_allow_html=True)
     
-    # Create direct link button using markdown + HTML with absolute path to pages
-    col1, col2, col3 = st.columns([2, 1, 2])
-    with col2:
-        if st.button("Get Started"):
-            st.switch_page("pages/1_Data_Ingestion.py")
+    # # Create direct link button using markdown + HTML with absolute path to pages
+    # col1, col2, col3 = st.columns([2, 1, 2])
+    # with col2:
+    #     if st.button("Get Started"):
+            # st.switch_page("pages/1_Data_Ingestion.py")
+    if st.button("Get Started"):
+        st.switch_page("pages/1_Data_Ingestion.py")
 
     
 

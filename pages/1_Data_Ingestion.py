@@ -7,10 +7,25 @@ import io
 import json
 import time
 from datetime import datetime,timedelta
-from azure.storage.blob import BlobServiceClient, ContentSettings
 
 # Helper functions
-
+def normalize_columns(df, columns, method="zscore"):
+    df_normalized = df.copy()
+    
+    for col in columns:
+        suffix = "_z" if method == "zscore" else "_iqr"
+        if method == "zscore":
+            mean = df[col].mean()
+            std = df[col].std()
+            if std != 0:
+                df_normalized[col + suffix] = (df[col] - mean) / std
+        elif method == "iqr":
+            Q1 = df[col].quantile(0.25)
+            Q3 = df[col].quantile(0.75)
+            IQR = Q3 - Q1
+            if IQR != 0:
+                df_normalized[col + suffix] = (df[col] - Q1) / IQR
+    return df_normalized
 
 # Last week apportioning 
 
@@ -43,10 +58,6 @@ def last_working_day(year, month, work_days):
 
     return last_day
 
-def rename_adjusted(kpi_name):
-    new_name = "adjusted_" + kpi_name
-    return new_name
-
 
 def last_week_apportion(tactic_df,date_col_name,kpi_col_list,work_days):
     """""
@@ -62,6 +73,9 @@ def last_week_apportion(tactic_df,date_col_name,kpi_col_list,work_days):
     Returns
         tactic_df (dataframe): Dataframe with KPI columns apportioned
     """
+    def rename_adjusted(kpi_name):
+        new_name = "adjusted_" + kpi_name
+        return new_name
 
     # Step 1: Calculate last working date and create month level column
 
@@ -287,6 +301,7 @@ def kpi_table(df: pl.DataFrame):
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="ProcTimize", layout="wide")
 st.title("Data Ingestion")
+st.write("This page is for processing of one marketing channel at a time and saving")
 
 st.markdown("""
 <style>
@@ -411,23 +426,71 @@ st.markdown("""
 
 
 # --- FILE UPLOAD ---
-uploaded_files = st.file_uploader("📄 Upload one or more CSV files", type="csv", accept_multiple_files=True)
+with st.expander("Upload One or More CSV Files"):
+    uploaded_files = st.file_uploader(
+        "Select CSV file(s) to upload:",
+        type="csv",
+        accept_multiple_files=True
+    )
+
+# --- ☁️ BLOB STORAGE PLACEHOLDER ---
+with st.expander("Connect to Azure Blob Storage (Coming Soon)"):
+    st.markdown("This section will allow you to securely connect to an Azure Blob Storage account and load files directly.")
+
+    st.subheader("Azure Credentials")
+    blob_account_name = st.text_input("Azure Storage Account Name", disabled=True, placeholder="e.g., mystorageaccount")
+    blob_container_name = st.text_input("Container Name", disabled=True, placeholder="e.g., marketing-data")
+    blob_sas_token = st.text_input("SAS Token", type="password", disabled=True, placeholder="Your secure token")
+
+    st.subheader("File Selection")
+    st.selectbox("Browse files in container", options=["-- Coming soon --"], disabled=True)
+    st.button("Refresh File List", disabled=True)
+
+    st.markdown("---")
+    st.info("You will be able to load files directly from your Azure Blob Storage container using the credentials above.")
+
+    # 🔧 TO IMPLEMENT LATER:
+    # from azure.storage.blob import ContainerClient
+    #
+    # container_url = f"https://{blob_account_name}.blob.core.windows.net/{blob_container_name}?{blob_sas_token}"
+    # container_client = ContainerClient.from_container_url(container_url)
+    # blobs = [blob.name for blob in container_client.list_blobs()]
+    # blob_client = container_client.get_blob_client(blob_name)
+    # stream = blob_client.download_blob().readall()
+    # df_final = pd.read_csv(io.BytesIO(stream))
 
 df_final = None
 
 if uploaded_files:
     
     if len(uploaded_files) == 1:
-        with st.expander("🧱 Standardize Columns for Single File"):
+        with st.expander("Standardize Columns for Single File"):
             file = uploaded_files[0]
             df = pd.read_csv(file)
             st.markdown(f"**File: {file.name}**")
+            
+            # Step 1: Column Selection
+            selected_cols = st.multiselect(
+                f"Select columns from `{file.name}`:",
+                df.columns.tolist(),
+                  default=df.columns.tolist(),
+                  key=f"select_cols_0"
+            )
+            df = df[selected_cols]
 
-        
-            rename_df = pd.DataFrame({"Current Column": df.columns, "New Column Name": df.columns})
-
+             # Step 2a: Column Renaming
+            rename_df = pd.DataFrame({
+                "Current Column": df.columns, 
+                "New Column Name": df.columns})
+            
+            # Make 'Current Column' read-only
+            column_config = {
+                "Current Column": st.column_config.Column(disabled=True),
+                "New Column Name": st.column_config.TextColumn()
+                 }
             edited_rename_df = st.data_editor(
                 rename_df,
+                column_config=column_config,
                 num_rows="dynamic",
                 use_container_width=True,
                 key="rename_editor"
@@ -438,8 +501,7 @@ if uploaded_files:
             ))
             df = df.rename(columns=rename_dict)
 
-
-            # ✅ Step 2b: Date Standardization
+            # Step 2b: Date Standardization
             date_cols = st.multiselect(
                 "Select Date Columns (if any):", 
                 df.columns.tolist(), 
@@ -455,6 +517,8 @@ if uploaded_files:
                     key=f"date_format_single_{date_col}"
                 )
 
+                # Need to double check this
+
                 if date_format == "Custom":
                     date_format = st.text_input(
                         "Enter custom date format (e.g., %d-%b-%Y):", 
@@ -467,7 +531,7 @@ if uploaded_files:
                             df[date_col], 
                             format=date_format, 
                             errors='coerce'
-                        ).dt.strftime("%Y/%m/%d")
+                        )
                         st.success(f"✅ Date column `{date_col}` standardized from `{date_format}` to `YYYY/MM/DD` format!")
                     except Exception as e:
                         st.error(f"❌ Failed to parse date column `{date_col}`: {e}")
@@ -478,7 +542,12 @@ if uploaded_files:
 
             # Convert to Polars for filtering
             df_final = pl.from_pandas(df)
-
+            df_final = df_final.with_columns([
+                    pl.col(col).cast(pl.Date) 
+                    for col, dtype in zip(df_final.columns, df_final.dtypes) 
+                    if dtype == pl.Datetime
+                ])
+            st.session_state["df_final"] = df_final
 
     else:
         
@@ -507,8 +576,14 @@ if uploaded_files:
                     "New Column Name": selected_cols
                 })
 
+                column_config = {
+                    "Current Column": st.column_config.Column(disabled=True),
+                    "New Column Name": st.column_config.TextColumn()
+                    }
+
                 edited_rename_df = st.data_editor(
                     rename_df,
+                    column_config=column_config,
                     num_rows="dynamic",
                     use_container_width=True,
                     key=f"rename_editor_{i}"
@@ -552,14 +627,23 @@ if uploaded_files:
                     # Convert and standardize to YYYY/MM/DD format
                     if date_format:
                         try:
+                            # df[date_col] = pd.to_datetime(
+                            #     df[date_col], 
+                            #     format=date_format, 
+                            #     errors='coerce'
+                            # ).dt.strftime("%Y/%m/%d")
+                            # df[date_col] = df[date_col].fillna("")
+
                             df[date_col] = pd.to_datetime(
                                 df[date_col], 
                                 format=date_format, 
                                 errors='coerce'
-                            ).dt.strftime("%Y/%m/%d")
-                            df[date_col] = df[date_col].fillna("")
+                            )
+                            # df[date_col] = df[date_col].fillna("")
 
                             st.success(f"✅ Date column `{date_col}` standardized from `{date_format}` to `YYYY/MM/DD` format!")
+                            # st.dataframe(df.dt.strftime("%Y/%m/%d"))
+                            # st.write(df.dtypes)
                         except Exception as e:
                             st.error(f"❌ Failed to parse date column `{date_col}`: {e}")
                             
@@ -598,12 +682,27 @@ if uploaded_files:
                 for col_name in join_keys:
                     if col_name in df_final.columns:
                         df_final = df_final[df_final[col_name].notnull()]
-                merged_df = df_final.drop_duplicates()
+                # merged_df = df_final.drop_duplicates()
             else:
                 print("⚠️ No join_keys provided — skipping null identifier filtering.")
 
+            for col in df_final.select_dtypes(include="object").columns:
+                    if "date" in col.lower():
+                        try:
+                            df_final[col] = pd.to_datetime(df_final[col], errors='coerce')
+                        except:
+                            pass
+            # st.write(df_final.dtypes)
             df_final = pl.from_pandas(df_final)
+            # st.write(df_final.dtypes)
+            df_final = df_final.with_columns([
+                    pl.col(col).cast(pl.Date) 
+                    for col, dtype in zip(df_final.columns, df_final.dtypes) 
+                    if dtype == pl.Datetime
+                ])
             st.session_state["df_final"] = df_final
+            st.write(df_final)
+
 
     # ---------------------- FILTERING SECTION ----------------------
     with st.expander("🔍Filter Data"):
@@ -617,17 +716,21 @@ if uploaded_files:
             
         if df_final is not None:
             st.write("### Sample of the Dataset")
-        #    # Drop the first column of the DataFrame and get all numeric columns from the rest
-        #     cols_to_format = df_final.drop(df_final.columns[0], 1).select_dtypes(include='number').columns
 
-        #     # Apply comma formatting only to selected columns
-        #     styled_df = df_final.style.format({col: '{:,}' for col in cols_to_format})
+            # Creating dataframe with only date for display purposes
+            df_display = df_final.clone()
 
-        #     # Display with Streamlit
-        #     st.dataframe(styled_df)
+            for col, dtype in zip(df_display.columns, df_display.dtypes):
+                if dtype in [pl.Date, pl.Datetime]:
+                    df_display = df_display.with_columns(
+                        pl.col(col).dt.strftime("%Y-%m-%d").alias(col)
+                    )
+
+            # Display the formatted DataFrame
+            st.dataframe(df_display.head())
 
 
-            st.dataframe(df_final.head())
+            # st.dataframe(df_final.head())
 
             date_column = st.selectbox("Select the column representing Date in merged dataset", df_final.columns)
             st.session_state["date_col"] = date_column
@@ -662,6 +765,8 @@ if uploaded_files:
                     df_final = df_final.filter((pl.col(date_column) >= start_date) & (pl.col(date_column) <= end_date))
 
             df_filtered = df_final.clone()
+
+
             categorical_cols = [col for col in df_filtered.columns if df_filtered[col].dtype == pl.Utf8]
 
             if categorical_cols:
@@ -701,10 +806,75 @@ if uploaded_files:
                         df_filtered = df_filtered.filter(combined_condition)
                         st.session_state["df_filtered"] = df_filtered
                         st.session_state["filter_complete"] = True
+           
+            # --- NUMERICAL FILTERING ---
+            numeric_cols = [col for col in df_filtered.columns if df_filtered[col].dtype in [pl.Int32, pl.Int64, pl.Float32, pl.Float64]]
+            numerical_conditions = []
+
+            if numeric_cols:
+                st.write("### 🔢 Numerical Column(s) to filter on")
+                selected_num_cols = st.multiselect("Select numerical columns to filter:", numeric_cols)
+
+                for col in selected_num_cols:
+                    st.markdown(f"**Filter for `{col}`**")
+                    operator = st.selectbox(
+                        f"Choose condition for `{col}`:",
+                        options=[
+                            "Equals", "Does not equal",
+                            "Greater than", "Greater than or equal to",
+                            "Less than", "Less than or equal to"
+                        ],
+                        key=f"num_op_{col}"
+                    )
+
+                    value = st.number_input(f"Enter value for `{col}`:", key=f"num_val_{col}")
+
+                    # Round the column for equality comparison if float
+                    if df_filtered[col].dtype in [pl.Float32, pl.Float64]:
+                        df_filtered = df_filtered.with_columns(pl.col(col).round(3))
+
+                    # Build condition
+                    if operator == "Equals":
+                        numerical_conditions.append(pl.col(col) == value)
+                    if operator == "Does not equal":
+                        numerical_conditions.append(pl.col(col) != value)
+                    elif operator == "Greater than":
+                        numerical_conditions.append(pl.col(col) > value)
+                    elif operator == "Greater than or equal to":
+                        numerical_conditions.append(pl.col(col) >= value)
+                    elif operator == "Less than":
+                        numerical_conditions.append(pl.col(col) < value)
+                    elif operator == "Less than or equal to":
+                        numerical_conditions.append(pl.col(col) <= value)
+
+            # Apply numerical filters together
+            if numerical_conditions:
+                combined_condition = numerical_conditions[0]
+                for cond in numerical_conditions[1:]:
+                    combined_condition = combined_condition & cond
+                df_filtered = df_filtered.filter(combined_condition)
+
+                st.info(f"🔎 Rows after numerical filtering: {df_filtered.shape[0]}")
+
+                st.session_state["df_filtered"] = df_filtered
+                st.session_state["filter_complete"] = True
+
 
         if st.session_state.get("filter_complete") and "df_filtered" in st.session_state:
             st.write("Final Filtered Dataset")
-            st.dataframe(st.session_state["df_filtered"].head(100).to_pandas())
+
+            # Display the formatted DataFrame
+            df_filtered = st.session_state["df_filtered"]
+
+            df_filtered_display = df_filtered.clone()
+
+            for col, dtype in zip(df_filtered_display.columns, df_filtered_display.dtypes):
+                if dtype in [pl.Date, pl.Datetime]:
+                    df_filtered_display = df_filtered_display.with_columns(
+                        pl.col(col).dt.strftime("%Y-%m-%d").alias(col)
+                    )
+
+            st.dataframe(df_filtered_display.head(100).to_pandas())
 
             csv_bytes = df_filtered.write_csv()
             st.download_button("📥 Download CSV", data=csv_bytes, file_name="final_filtered_data.csv", mime="text/csv")
@@ -800,6 +970,24 @@ if uploaded_files:
 
                         st.session_state["df_transformed"] = df_transformed
                         st.session_state["transform_complete"] = True
+            
+            # --- NORMALIZATION SECTION ---
+            if st.session_state.get("transform_complete") and "df_transformed" in st.session_state:
+                df_transformed = st.session_state["df_transformed"]
+
+                st.subheader("🧮 Normalize Numerical Columns")
+
+                numeric_cols = df_transformed.select_dtypes(include=[np.number]).columns.tolist()
+                selected_norm_cols = st.multiselect("Select columns to normalize:", numeric_cols, key="norm_cols")
+
+                norm_method = st.radio("Normalization method:", ["Z-Score", "Interquartile Range (IQR)"], key="norm_method")
+
+                if st.button("Normalize Selected Columns", key="normalize_button"):
+                    method_key = "zscore" if norm_method == "Z-Score" else "iqr"
+                    df_normalized = normalize_columns(df_transformed, selected_norm_cols, method=method_key)
+                    st.session_state["df_transformed"] = df_normalized
+                    st.success("✅ Normalization applied.")
+                    st.dataframe(df_normalized.head())
 
                 # --- Display renaming and download UI after transformation ---
                 if st.session_state.get("transform_complete") and "df_transformed" in st.session_state:
